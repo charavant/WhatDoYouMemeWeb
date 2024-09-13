@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client</title>
+</head>
+<body>
+    <h1>Client Page</h1>
+    <div id="choices"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let hasVoted = false;
+
+        socket.on('voting_started', (data) => {
+            const choicesDiv = document.getElementById('choices');
+            choicesDiv.innerHTML = '';
+            data.choices.forEach(choice => {
+                const button = document.createElement('button');
+                button.textContent = choice;
+                button.onclick = () => vote(choice);
+                choicesDiv.appendChild(button);
+            });
+            hasVoted = false;
+        });
+
+        function vote(choice) {
+            if (!hasVoted) {
+                socket.emit('vote', {choice: choice});
+                hasVoted = true;
+                alert('Vote submitted!');
+            } else {
+                alert('You have already voted!');
+            }
+        }
+    </script>
+</body>
+</html>

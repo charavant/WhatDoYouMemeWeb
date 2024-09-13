@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>What do you Meme?</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .hidden { display: none; }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">What do you Meme?</h1>
+        
+        <!-- Lobby -->
+        <div id="lobby" class="text-center">
+            <button id="create-game" class="btn btn-primary">Create New Game</button>
+        </div>
+
+        <!-- Join Game -->
+        <div id="join-game" class="mt-3 hidden">
+            <input type="text" id="player-name" class="form-control mb-2" placeholder="Enter your name">
+            <button id="join-game-btn" class="btn btn-success">Join Game</button>
+        </div>
+
+        <!-- Game Area -->
+        <div id="game-area" class="hidden">
+            <h2 class="text-center">Game ID: <span id="game-id" class="badge bg-secondary"></span></h2>
+            
+            <!-- Player Info -->
+            <div id="player-info" class="text-center mb-3">
+                <h3>Player: <span id="player-name-display"></span></h3>
+                <p>Player ID: <span id="player-id"></span></p>
+            </div>
+
+            <!-- Current Image -->
+            <div id="current-image" class="text-center mb-3"></div>
+
+            <!-- Player Input Window -->
+            <div id="response-area" class="mb-4">
+                <h3>Your Response</h3>
+                <div class="input-group">
+                    <input type="text" id="response-input" class="form-control" placeholder="Enter your response">
+                    <button id="submit-response" class="btn btn-primary">Submit</button>
+                </div>
+            </div>
+
+            <!-- Voting Window -->
+            <div id="voting-area" class="hidden mb-4">
+                <h3>Vote for the best response:</h3>
+                <ul id="response-list" class="list-group"></ul>
+            </div>
+
+            <!-- Results Window -->
+            <div id="results-area" class="hidden mb-4">
+                <h3>Results:</h3>
+                <ul id="results-list" class="list-group"></ul>
+            </div>
+
+            <!-- Game Controls -->
+            <div class="text-center">
+                <button id="start-round" class="btn btn-primary hidden">Start Next Round</button>
+                <button id="end-game" class="btn btn-danger hidden">End Game</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="{{ url_for('static', filename='css/bootstrap-5.1.3-dist/js/bootstrap.bundle.min.js') }}"></script>
+    <script>
+        let gameId, playerId;
+
+        $('#create-game').click(() => {
+            console.log('Create game button clicked');
+            $.post('/create_game', (data) => {
+                console.log('Create game response:', data);
+                gameId = data.game_id;
+                $('#game-id').text(gameId);
+                $('#lobby').addClass('hidden');
+                $('#join-game').removeClass('hidden');
+            }).fail((jqXHR, textStatus, errorThrown) => {
+                console.error('Create game request failed:', textStatus, errorThrown);
+            });
+        });
+
+        $('#join-game-btn').click(() => {
+            const playerName = $('#player-name').val();
+            console.log('Join game button clicked. Player name:', playerName);
+            $.post(`/join_game/${gameId}`, JSON.stringify({player_name: playerName}), (data) => {
+                console.log('Join game response:', data);
+                playerId = data.player_id;
+                $('#player-id').text(playerId);
+                $('#player-name-display').text(playerName);
+                $('#join-game').addClass('hidden');
+                $('#game-area').removeClass('hidden');
+                $('#start-round').removeClass('hidden');
+            }, 'json').fail((jqXHR, textStatus, errorThrown) => {
+                console.error('Join game request failed:', textStatus, errorThrown);
+                console.error('Response:', jqXHR.responseText);
+            });
+        });
+
+        $('#start-round').click(() => {
+            $.post(`/start_round/${gameId}`, (data) => {
+                $('#current-image').html(`<img src="${data.image}" alt="Meme Image" class="img-fluid">`);
+                $('#response-area').removeClass('hidden');
+                $('#start-round').addClass('hidden');
+            });
+        });
+
+        $('#submit-response').click(() => {
+            const response = $('#response-input').val();
+            console.log('Submitting response:', response);
+            $.ajax({
+                url: '/submit_response',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    game_id: gameId,
+                    player_id: playerId,
+                    response: response
+                }),
+                success: (data) => {
+                    console.log('Submit response success:', data);
+                    $('#response-area').addClass('hidden');
+                    checkAllResponses();
+                },
+                error: (jqXHR, textStatus, errorThrown) => {
+                    console.error('Submit response failed:', textStatus, errorThrown);
+                    console.error('Response:', jqXHR.responseText);
+                    alert('Failed to submit response. Please try again.');
+                }
+            });
+        });
+
+        function checkAllResponses() {
+            $.get(`/get_responses/${gameId}`, (data) => {
+                if (data.length > 0) {
+                    showVoting(data);
+                } else {
+                    setTimeout(checkAllResponses, 1000);
+                }
+            });
+        }
+
+        function showVoting(responses) {
+            $('#voting-area').removeClass('hidden');
+            const $list = $('#response-list').empty();
+            responses.forEach(response => {
+                $list.append(`<li class="list-group-item">
+                    <button class="btn btn-outline-primary vote-btn" data-id="${response.id}">${response.text}</button>
+                </li>`);
+            });
+        }
+
+        $(document).on('click', '.vote-btn', function() {
+            const responseId = $(this).data('id');
+            $.post('/vote', JSON.stringify({response_id: responseId}), () => {
+                $('#voting-area').addClass('hidden');
+                showResults();
+            }, 'json');
+        });
+
+        function showResults() {
+            $.get(`/get_results/${gameId}`, (data) => {
+                $('#results-area').removeClass('hidden');
+                const $list = $('#results-list').empty();
+                data.forEach(result => {
+                    $list.append(`<li class="list-group-item">${result.player_name}: ${result.text} (${result.votes} votes)</li>`);
+                });
+                $('#start-round').removeClass('hidden');
+                $('#end-game').removeClass('hidden');
+            });
+        }
+
+        $('#end-game').click(() => {
+            $.post(`/end_game/${gameId}`, () => {
+                alert('Game ended!');
+                location.reload();
+            });
+        });
+    </script>
+</body>
+</html>
