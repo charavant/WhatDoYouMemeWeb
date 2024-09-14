@@ -41,14 +41,20 @@
 <body>
 
     <div class="container coordinator-container">
+        <!-- Add this checkbox to the top right corner -->
+        <div class="form-check form-switch position-absolute top-0 end-0 m-3">
+            <input class="form-check-input" type="checkbox" id="hideButtons" checked>
+            <label class="form-check-label" for="hideButtons">Hide</label>
+        </div>
+
         <div class="text-center mb-4">
-            <h1>Coordinator Page</h1>
+            <h1>What Do You Meme</h1>
         </div>
 
         <!-- Input for Choice/Barcode -->
         <div class="mb-3">
             <label for="choice-input" class="form-label">Enter Choice or Barcode</label>
-            <input type="text" id="choice-input" class="form-control" placeholder="Enter choice or barcode">
+            <input type="text" id="choice-input" class="form-control" placeholder="Enter choice or barcode" onkeypress="handleKeyPress(event)">
         </div>
 
         <!-- Add Choice Button -->
@@ -62,50 +68,75 @@
         <!-- Button Group -->
         <div class="button-group">
             <button class="btn btn-secondary" onclick="clearChoices()">Clear Choices</button>
-            <button class="btn btn-success" onclick="submitChoices()">Submit Choices</button>
-            <button class="btn btn-warning" onclick="startVoting()">Start Voting</button>
-            <button class="btn btn-info" onclick="startNewRound()">Start New Round</button>
+            <button class="btn btn-success" onclick="submitChoices()" id="submitBtn">Submit Choices</button>
+            <button class="btn btn-warning" onclick="startVoting()" id="voteBtn">Start Voting</button>
+            <button class="btn btn-info" onclick="startNewRound()" id="newRoundBtn">Start New Round</button>
         </div>
     </div>
 
     <!-- JavaScript Section -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
+        const socket = io();
         let choices = [];
 
+        // Add this function to toggle button visibility
+        function toggleButtons() {
+            const hideButtons = document.getElementById('hideButtons').checked;
+            const buttons = ['submitBtn', 'voteBtn', 'newRoundBtn'];
+            buttons.forEach(btnId => {
+                document.getElementById(btnId).style.display = hideButtons ? 'none' : 'block';
+            });
+        }
+
+        // Call this function on page load to set initial state
+        document.addEventListener('DOMContentLoaded', function() {
+            toggleButtons();
+            document.getElementById('hideButtons').addEventListener('change', toggleButtons);
+        });
+
         async function addChoice() {
-            const input = document.getElementById('choice-input').value.trim();
-            if (input) {
+            const input = document.getElementById('choice-input');
+            const inputValue = input.value.trim();
+            if (inputValue) {
                 try {
                     const response = await fetch('/check_barcode', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({barcode: input})
+                        body: JSON.stringify({barcode: inputValue})
                     });
                     const data = await response.json();
                     if (data.success) {
                         choices.push(data.text);
                     } else {
-                        choices.push(input);
+                        choices.push(inputValue);
                     }
                     updateChoicesList();
-                    document.getElementById('choice-input').value = '';
+                    input.value = '';
+                    // Emit the updated choices to the server
+                    console.log('Emitting updated choices:', choices);
+                    socket.emit('update_choices', choices);
                 } catch (error) {
                     console.error('Error checking barcode:', error);
-                    choices.push(input);
+                    choices.push(inputValue);
                     updateChoicesList();
-                    document.getElementById('choice-input').value = '';
+                    input.value = '';
+                    // Emit the updated choices to the server
+                    console.log('Emitting updated choices:', choices);
+                    socket.emit('update_choices', choices);
                 }
             }
+            input.focus(); // Return focus to the input box
         }
 
         function updateChoicesList() {
             const list = document.getElementById('choices-list');
             list.innerHTML = '';
-            choices.forEach(choice => {
+            choices.forEach((choice, index) => {
                 const li = document.createElement('li');
                 li.className = 'list-group-item';
-                li.textContent = choice;
+                const letter = String.fromCharCode(65 + index); // Convert index to letter (A, B, C, etc.)
+                li.textContent = `${letter}. ${choice}`;
                 list.appendChild(li);
             });
         }
@@ -138,6 +169,12 @@
                         alert('Failed to start new round. Please try again.');
                     }
                 });
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                addChoice();
+            }
         }
     </script>
 

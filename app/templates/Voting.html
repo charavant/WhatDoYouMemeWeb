@@ -1,9 +1,8 @@
+<!-- app/templates/Voting.html -->
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Voting</title>
     <link href="/static/css/bootstrap-5.1.3-dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
@@ -11,15 +10,13 @@
             background-color: #f0f8ff;
         }
         .voting-container {
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
-            text-align: center;
         }
         #randomImage {
             max-width: 100%;
             height: auto;
-            margin-top: 20px;
             border: 2px solid #007bff;
             box-shadow: 0 0 10px rgba(0, 123, 255, 0.5);
         }
@@ -31,54 +28,135 @@
             border: 1px solid #007bff;
             color: #007bff;
         }
+        #voteChart {
+            max-width: 100%;
+            height: 400px;
+        }
     </style>
+    <!-- Include Chart.js and QRCode.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
-
 <body>
 
     <div class="container voting-container">
-        <img id="randomImage" src="" alt="Random Image" class="img-fluid">
-        <div id="choices-list" class="mt-4"></div>
+        <div class="row">
+            <!-- Left side: Bar chart and QR code -->
+            <div class="col-md-6">
+                <canvas id="voteChart"></canvas>
+                <div id="qrCodeContainer" class="mt-4"></div>
+            </div>
+            <!-- Right side: Image and choices -->
+            <div class="col-md-6">
+                <img id="randomImage" src="" alt="Random Image" class="img-fluid">
+                <div id="choices-list" class="mt-4"></div>
+            </div>
+        </div>
     </div>
 
+    <!-- Include Socket.IO -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
         const socket = io();
-        let votes = {};
+        let chart;
+        let choiceLabels = [];
+        let voteCounts = [];
+        let backgroundColors = [];
+
+        // Generate different colors for the bars
+        function generateColors(count) {
+            let colors = [];
+            for (let i = 0; i < count; i++) {
+                colors.push('hsl(' + (i * 360 / count) + ', 70%, 50%)');
+            }
+            return colors;
+        }
+
+        function initializeChart(choices) {
+            choiceLabels = choices.map((choice, index) => String.fromCharCode(65 + index));
+            voteCounts = new Array(choices.length).fill(0);
+            backgroundColors = generateColors(choices.length);
+
+            const ctx = document.getElementById('voteChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: choiceLabels,
+                    datasets: [{
+                        label: 'Votes',
+                        data: voteCounts,
+                        backgroundColor: backgroundColors,
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateChart(votes) {
+            voteCounts = choiceLabels.map(label => votes[label] || 0);
+            chart.data.datasets[0].data = voteCounts;
+            chart.update();
+        }
 
         socket.on('voting_started', (data) => {
             const imageUrl = `/static/images/${data.image}`;
             document.getElementById('randomImage').src = imageUrl;
-        
-            // Debugging the received data
-            console.log('Received choices:', data.choices);
-        
-            // Check if choices exist before updating
+
+
             if (data.choices && data.choices.length > 0) {
                 updateChoicesList(data.choices);
+                initializeChart(data.choices);
             } else {
                 console.error('No choices received or choices array is empty');
             }
+
+            // Generate QR code
+            generateQRCode();
+        });
+
+        socket.on('vote_update', (updatedVotes) => {
+            updateChart(updatedVotes);
         });
 
         function updateChoicesList(choices) {
             const choicesList = document.getElementById('choices-list');
             choicesList.innerHTML = '';  // Clear the current list
-        
-            // Check if choices are valid before appending
-            if (choices && choices.length > 0) {
-                choices.forEach((choice, index) => {
-                    const choiceItem = document.createElement('div');
-                    choiceItem.className = 'choice-item';
-                    choiceItem.textContent = `${String.fromCharCode(65 + index)}. ${choice}`;  // Display choice as A, B, C...
-                    choicesList.appendChild(choiceItem);
-                });
-            } else {
-                choicesList.innerHTML = '<p>No choices available</p>';
-            }
+
+            choices.forEach((choice, index) => {
+                const choiceItem = document.createElement('div');
+                choiceItem.className = 'choice-item';
+                choiceItem.textContent = `${String.fromCharCode(65 + index)}. ${choice}`;  // Display choice as A, B, C...
+                choicesList.appendChild(choiceItem);
+            });
         }
+
+        function generateQRCode() {
+            const qrcodeContainer = document.getElementById('qrCodeContainer');
+            qrcodeContainer.innerHTML = ''; // Clear previous QR code
+            const port = window.location.port;
+            const clientUrl = `http://{{ local_ip }}:${port}/client`;
+    
+            new QRCode(qrcodeContainer, {
+                text: clientUrl,
+                width: 128,
+                height: 128,
+            });
+        }
+    
+        // Call generateQRCode() after the page has loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            generateQRCode();
+        });
     </script>
 
 </body>
-
 </html>

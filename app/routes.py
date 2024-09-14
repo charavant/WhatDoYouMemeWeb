@@ -1,9 +1,9 @@
-from flask import Blueprint, render_template, request, jsonify
+# app/routes.py
+from flask import Blueprint, render_template, request, jsonify, current_app
 from flask_socketio import emit
-from . import socketio
+from .socketio_instance import socketio  # Import the shared socketio instance
 import random
 import socket
-import requests
 import os
 
 main = Blueprint('main', __name__)
@@ -12,6 +12,10 @@ choices = []
 votes = {}
 current_image = None
 barcode_dict = {}
+
+# Initialize lists to track images
+available_images = []
+used_images = []
 
 def load_barcode_data():
     global barcode_dict
@@ -25,35 +29,71 @@ def load_barcode_data():
 
 load_barcode_data()
 
+def get_images():
+    images_dir = os.path.join(current_app.root_path, 'static', 'images')
+    images = [f for f in os.listdir(images_dir) if f.endswith(('.png', '.jpg', '.jpeg', '.gif'))]
+    return images
+
+
 @main.route('/')
 def coordinator():
-    return render_template('coordinator.html')
+    return render_template('Coordinator.html')
+
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # Connect to a public IP, doesn't have to be reachable
+        s.connect(('8.8.8.8', 80))
+        IP = s.getsockname()[0]
+    except Exception:
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
 
 @main.route('/voting')
 def voting():
-    return render_template('voting.html')
+    local_ip = get_local_ip()
+    return render_template('Voting.html', local_ip=local_ip)
 
 @main.route('/client')
 def client():
-    return render_template('client.html')
+    local_ip = get_local_ip()
+    return render_template('Client.html', local_ip=local_ip)
 
 @main.route('/submit_choices', methods=['POST'])
 def submit_choices():
     global choices, votes
     choices = request.json['choices']
     votes = {choice: 0 for choice in choices}
+    # Emit updated choices to all connected clients
+    socketio.emit('voting_started', {'choices': choices})
     return jsonify(success=True)
 
 @main.route('/start_voting', methods=['POST'])
 def start_voting():
-    global current_image, choices
-    images = get_images()
-    
+    global current_image, choices, available_images, used_images
     if not choices:
         return jsonify({"error": "No choices available"}), 400
-    
-    if images:
-        current_image = random.choice(images)
+
+    # Initialize images if first time
+    if not available_images and not used_images:
+        available_images = get_images()
+
+    # Reset images if all have been used
+    if not available_images:
+        available_images = used_images
+        used_images = []
+
+    # Select a random image and update lists
+    if available_images:
+        current_image = random.choice(available_images)
+        available_images.remove(current_image)
+        used_images.append(current_image)
+    else:
+        return jsonify({"error": "No images available"}), 400
+
+    print('Starting voting with choices:', choices)
     socketio.emit('voting_started', {'choices': choices, 'image': current_image})
     return jsonify(success=True)
 
@@ -66,25 +106,26 @@ def start_new_round():
     socketio.emit('new_round_started')
     return jsonify(success=True)
 
-@main.route('/get_images', methods=['GET'])
-def get_available_images():
-    images_dir = os.path.join('app', 'static', 'images')
-    try:
-        images = [f for f in os.listdir(images_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
-        return jsonify(images=images)
-    except Exception as e:
-        return jsonify(images=[]), 500
-
-def get_available_images():
-    images_dir = os.path.join('app', 'static', 'images')
-    return [f for f in os.listdir(images_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
-
 @socketio.on('vote')
 def handle_vote(data):
+    global votes
     choice = data['choice']
     if choice in votes:
         votes[choice] += 1
-        emit('vote_update', votes, broadcast=True)
+        # Emit updated vote counts to all connected clients
+        socketio.emit('vote_update', votes)
+
+@socketio.on('update_choices')
+def handle_update_choices(updated_choices):
+    global choices
+    choices = updated_choices
+    print('Received updated choices:', choices)
+    # Emit updated choices to all connected clients
+    socketio.emit('update_choices', choices)
+
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected')
 
 @main.route('/check_barcode', methods=['POST'])
 def check_barcode():
@@ -92,31 +133,3 @@ def check_barcode():
     if barcode in barcode_dict:
         return jsonify(success=True, text=barcode_dict[barcode])
     return jsonify(success=False)
-
-@main.route('/get_images', methods=['GET'])
-def get_images():
-    image_dir = os.path.join(app.static_folder, 'images')
-    images = [f for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg', '.gif'))]
-    return jsonify(images)
-
-def get_local_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
-
-def get_public_ip():
-    try:
-        response = requests.get('https://api.ipify.org?format=json')
-        return response.json()['ip']
-    except Exception:
-        return None  # Return None if unable to get public IP
-
-@socketio.on('start_voting')
-def handle_start_voting():
-    choices = ['Choice 1', 'Choice 2', 'Choice 3']  # Replace with your actual choices
-    socketio.emit('voting_started', {'choices': choices})
