@@ -1,9 +1,8 @@
+<!-- app/templates/Coordinator.html -->
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Coordinator</title>
     <link href="/static/css/bootstrap-5.1.3-dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
@@ -35,9 +34,16 @@
             flex-grow: 1;
             margin: 0 5px;
         }
+        .form-inline {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .form-inline input {
+            max-width: 100px;
+        }
     </style>
 </head>
-
 <body>
 
     <div class="container coordinator-container">
@@ -65,6 +71,12 @@
         <!-- Choices List -->
         <ul id="choices-list" class="list-group"></ul>
 
+        <!-- Timer Setter -->
+        <div class="form-inline mb-4" id="timerContainer">
+            <label for="timer-input" class="form-label">Set Timer (seconds):</label>
+            <input type="number" id="timer-input" class="form-control" min="10" value="30">
+        </div>
+
         <!-- Button Group -->
         <div class="button-group">
             <button class="btn btn-secondary" onclick="clearChoices()">Clear Choices</button>
@@ -79,17 +91,16 @@
     <script>
         const socket = io();
         let choices = [];
+        let roundNumber = 1;
 
-        // Add this function to toggle button visibility
         function toggleButtons() {
             const hideButtons = document.getElementById('hideButtons').checked;
-            const buttons = ['submitBtn', 'voteBtn', 'newRoundBtn'];
-            buttons.forEach(btnId => {
-                document.getElementById(btnId).style.display = hideButtons ? 'none' : 'block';
+            const elements = ['submitBtn', 'voteBtn', 'newRoundBtn', 'timerContainer'];
+            elements.forEach(elementId => {
+                document.getElementById(elementId).style.display = hideButtons ? 'none' : 'block';
             });
         }
 
-        // Call this function on page load to set initial state
         document.addEventListener('DOMContentLoaded', function() {
             toggleButtons();
             document.getElementById('hideButtons').addEventListener('change', toggleButtons);
@@ -113,16 +124,12 @@
                     }
                     updateChoicesList();
                     input.value = '';
-                    // Emit the updated choices to the server
-                    console.log('Emitting updated choices:', choices);
                     socket.emit('update_choices', choices);
                 } catch (error) {
                     console.error('Error checking barcode:', error);
                     choices.push(inputValue);
                     updateChoicesList();
                     input.value = '';
-                    // Emit the updated choices to the server
-                    console.log('Emitting updated choices:', choices);
                     socket.emit('update_choices', choices);
                 }
             }
@@ -135,7 +142,7 @@
             choices.forEach((choice, index) => {
                 const li = document.createElement('li');
                 li.className = 'list-group-item';
-                const letter = String.fromCharCode(65 + index); // Convert index to letter (A, B, C, etc.)
+                const letter = String.fromCharCode(65 + index);
                 li.textContent = `${letter}. ${choice}`;
                 list.appendChild(li);
             });
@@ -155,7 +162,13 @@
         }
 
         function startVoting() {
-            fetch('/start_voting', {method: 'POST'});
+            const timerValue = parseInt(document.getElementById('timer-input').value);
+            fetch('/start_voting', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({timer: timerValue, round: roundNumber})
+            });
+            roundNumber += 1;
         }
 
         function startNewRound() {
@@ -180,5 +193,4 @@
 
     <script src="/static/css/bootstrap-5.1.3-dist/js/bootstrap.bundle.min.js"></script>
 </body>
-
 </html>
