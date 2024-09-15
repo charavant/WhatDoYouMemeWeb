@@ -1,7 +1,7 @@
 # app/routes.py
 from flask import Blueprint, render_template, request, jsonify, current_app
 from flask_socketio import emit
-from .socketio_instance import socketio  # Import the shared socketio instance
+from .socketio_instance import socketio
 import random
 import os
 import socket
@@ -37,7 +37,6 @@ def get_images():
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # Connect to a public IP, doesn't have to be reachable
         s.connect(('8.8.8.8', 80))
         IP = s.getsockname()[0]
     except Exception:
@@ -52,7 +51,24 @@ def coordinator():
 
 @main.route('/voting')
 def voting():
+    global current_image, available_images, used_images
     local_ip = get_local_ip()
+    if current_image is None:
+        # Initialize images if first time
+        if not available_images and not used_images:
+            available_images = get_images()
+
+        if not available_images:
+            available_images = used_images
+            used_images = []
+
+        if available_images:
+            current_image = random.choice(available_images)
+            available_images.remove(current_image)
+            used_images.append(current_image)
+        else:
+            print("No images available.")
+            current_image = None
     return render_template('Voting.html', local_ip=local_ip)
 
 @main.route('/client')
@@ -64,35 +80,19 @@ def client():
 def submit_choices():
     global choices, votes
     choices = request.json['choices']
-    votes = {choice: 0 for choice in choices}
-    socketio.emit('voting_started', {'choices': choices})
+    votes = {chr(65 + i): 0 for i in range(len(choices))}  # Use labels as keys
+    socketio.emit('update_choices', {'choices': choices})
     return jsonify(success=True)
 
 @main.route('/start_voting', methods=['POST'])
 def start_voting():
-    global current_image, choices, available_images, used_images, current_timer, round_number
+    global current_timer
     data = request.json
     timer = data.get('timer', 30)
-    round_number = data.get('round', round_number)
+    current_timer = timer
 
     if not choices:
         return jsonify({"error": "No choices available"}), 400
-
-    if not available_images and not used_images:
-        available_images = get_images()
-
-    if not available_images:
-        available_images = used_images
-        used_images = []
-
-    if available_images:
-        current_image = random.choice(available_images)
-        available_images.remove(current_image)
-        used_images.append(current_image)
-    else:
-        return jsonify({"error": "No images available"}), 400
-
-    current_timer = timer
 
     print('Starting voting with choices:', choices)
     socketio.emit('voting_started', {
@@ -105,37 +105,60 @@ def start_voting():
 
 @main.route('/start_new_round', methods=['POST'])
 def start_new_round():
-    global choices, votes, current_image, current_timer
+    global choices, votes, current_image, current_timer, round_number, available_images, used_images
     choices = []
     votes = {}
-    current_image = None
     current_timer = None
-    socketio.emit('new_round_started')
+    round_number += 1
+
+    # Select a new image
+    if not available_images:
+        if used_images:
+            available_images = used_images
+            used_images = []
+        else:
+            available_images = get_images()
+
+    if available_images:
+        current_image = random.choice(available_images)
+        available_images.remove(current_image)
+        used_images.append(current_image)
+    else:
+        print("No images available.")
+        current_image = None
+
+    socketio.emit('new_round_started', {
+        'image': current_image,
+        'round': round_number
+    })
     return jsonify(success=True)
 
 @socketio.on('vote')
 def handle_vote(data):
     global votes
-    choice = data['choice']
-    if choice in votes:
-        votes[choice] += 1
+    choice_label = data['choice']
+    if choice_label in votes:
+        votes[choice_label] += 1
         socketio.emit('vote_update', votes)
 
 @socketio.on('update_choices')
-def handle_update_choices(updated_choices):
-    global choices
+def handle_update_choices(data):
+    global choices, votes
+    updated_choices = data['choices']
     choices = updated_choices
+    votes = {chr(65 + i): 0 for i in range(len(choices))}  # Reset votes with labels
     print('Received updated choices:', choices)
-    socketio.emit('update_choices', choices)
+    socketio.emit('update_choices', {'choices': choices})
 
 @socketio.on('request_current_state')
 def handle_current_state():
-    global choices, current_image, current_timer, round_number
+    global choices, current_image, current_timer, round_number, votes
     emit('current_state', {
         'choices': choices,
         'image': current_image,
         'timer': current_timer,
-        'round': round_number
+        'round': round_number,
+        'votes': votes
     })
 
 @socketio.on('connect')
